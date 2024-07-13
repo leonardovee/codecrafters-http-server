@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
+use crate::{http_request::HttpRequest, http_response::HttpResponse};
+
 #[derive(Debug)]
 struct Node {
     children: HashMap<String, Node>,
     is_endpoint: bool,
     method: Option<String>,
-    handler: Option<fn(&HashMap<String, String>) -> String>,
+    handler: Option<fn(HttpRequest) -> HttpResponse>,
 }
 
 impl Node {
@@ -29,12 +31,7 @@ impl PrefixTree {
         PrefixTree { root: Node::new() }
     }
 
-    pub fn insert(
-        &mut self,
-        path: &str,
-        method: &str,
-        handler: fn(&HashMap<String, String>) -> String,
-    ) {
+    pub fn insert(&mut self, path: &str, method: &str, handler: fn(HttpRequest) -> HttpResponse) {
         let mut node = &mut self.root;
         for part in path.split('/').filter(|&x| !x.is_empty()) {
             node = node.children.entry(part.to_string()).or_insert(Node::new());
@@ -49,7 +46,7 @@ impl PrefixTree {
         path: &str,
     ) -> Option<(
         &str,
-        fn(&HashMap<String, String>) -> String,
+        fn(HttpRequest) -> HttpResponse,
         HashMap<String, String>,
     )> {
         let mut node = &self.root;
