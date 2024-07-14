@@ -1,3 +1,4 @@
+use async_compression::tokio::bufread::GzipEncoder;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 mod http_request;
@@ -44,7 +45,6 @@ async fn main() {
 
             match File::create(&file_path).await {
                 Ok(mut file) => {
-                    println!("{:?}", req);
                     if let Err(e) = file.write_all(&req.body).await {
                         HttpResponse::new(HttpStatus::InternalServerError)
                             .with_body(format!("Failed to write file: {}", e))
@@ -75,10 +75,6 @@ async fn main() {
                     HttpResponse::new(HttpStatus::Ok)
                         .with_body(contents)
                         .with_header("Content-Type", "application/octet-stream")
-                        .with_header(
-                            "Content-Disposition",
-                            format!("attachment; filename=\"{}\"", file_name),
-                        )
                 }
                 Err(_) => HttpResponse::new(HttpStatus::NotFound)
                     .with_body(format!("File not found: {}", file_name)),
@@ -139,14 +135,16 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
             .await
             .unwrap();
     }
-    println!("{:?}", body);
 
     match ptree.search(path, method) {
         Some((handler, params)) => {
             let mut response = handler(HttpRequest::new(headers.clone(), params, body)).await;
             if let Some(encoding) = headers.get("Accept-Encoding") {
                 if encoding.contains("gzip") {
-                    response = response.with_header("Content-Encoding", "gzip");
+                    let compressed_body = compress_body(&response.body).await;
+                    response = response
+                        .with_body(compressed_body)
+                        .with_header("Content-Encoding", "gzip");
                 }
             }
             send_response(&mut stream, response.to_string()).await;
@@ -161,7 +159,14 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
     }
 }
 
-async fn send_response(stream: &mut TcpStream, response: String) {
-    stream.write_all(response.as_bytes()).await.unwrap();
+async fn send_response(stream: &mut TcpStream, response: Vec<u8>) {
+    stream.write_all(&response).await.unwrap();
     stream.flush().await.unwrap();
+}
+
+async fn compress_body(body: &[u8]) -> Vec<u8> {
+    let mut encoder = GzipEncoder::new(body.as_ref());
+    let mut compressed = Vec::new();
+    encoder.read_to_end(&mut compressed).await.unwrap();
+    compressed
 }

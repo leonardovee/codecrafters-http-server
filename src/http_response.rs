@@ -25,7 +25,7 @@ impl HttpStatus {
 pub struct HttpResponse {
     status_code: HttpStatus,
     headers: HashMap<String, String>,
-    body: Vec<u8>,
+    pub body: Vec<u8>,
 }
 
 impl HttpResponse {
@@ -52,19 +52,26 @@ impl HttpResponse {
         self
     }
 
-    pub fn to_string(&self) -> String {
-        let status_line = format!(
-            "HTTP/1.1 {} {}\r\n",
-            self.status_code as u16,
-            self.status_code.as_str()
-        );
-        let headers: String = self
-            .headers
-            .iter()
-            .map(|(k, v)| format!("{}: {}\r\n", k, v))
-            .collect();
-        let body = String::from_utf8_lossy(&self.body);
+    pub fn to_string(&self) -> Vec<u8> {
+        let mut response = Vec::new();
 
-        format!("{}{}\r\n{}", status_line, headers, body)
+        response.extend_from_slice(
+            format!(
+                "HTTP/1.1 {} {}\r\n",
+                self.status_code as u16,
+                self.status_code.as_str()
+            )
+            .as_bytes(),
+        );
+
+        for (k, v) in &self.headers {
+            response.extend_from_slice(format!("{}: {}\r\n", k, v).as_bytes());
+        }
+
+        response.extend_from_slice(b"\r\n");
+
+        response.extend_from_slice(&self.body);
+
+        response
     }
 }
