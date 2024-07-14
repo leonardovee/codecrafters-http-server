@@ -34,7 +34,7 @@ async fn main() {
     });
     ptree.insert("/user-agent", "GET", |req| async move {
         HttpResponse::new(HttpStatus::Ok)
-            .with_body(req.headers.get("user-agent").unwrap().to_string())
+            .with_body(req.headers.get("User-Agent").unwrap().to_string())
     });
     ptree.insert("/files/{file_name}", "POST", move |req| {
         let dir2_clone = Arc::clone(&dir2);
@@ -44,6 +44,7 @@ async fn main() {
 
             match File::create(&file_path).await {
                 Ok(mut file) => {
+                    println!("{:?}", req);
                     if let Err(e) = file.write_all(&req.body).await {
                         HttpResponse::new(HttpStatus::InternalServerError)
                             .with_body(format!("Failed to write file: {}", e))
@@ -125,12 +126,12 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
         }
         let line = line.trim();
         if let Some((key, value)) = line.split_once(": ") {
-            headers.insert(key.to_lowercase(), value.to_string());
+            headers.insert(key.to_string(), value.to_string());
         }
     }
 
     let mut body = Vec::new();
-    if let Some(length) = headers.get("content-length") {
+    if let Some(length) = headers.get("Content-Length") {
         let length: usize = length.parse().unwrap_or(0);
         reader
             .take(length as u64)
@@ -138,16 +139,17 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
             .await
             .unwrap();
     }
+    println!("{:?}", body);
 
     match ptree.search(path, method) {
         Some((handler, params)) => {
-            send_response(
-                &mut stream,
-                handler(HttpRequest::new(headers, params, body))
-                    .await
-                    .to_string(),
-            )
-            .await;
+            let mut response = handler(HttpRequest::new(headers.clone(), params, body)).await;
+            if let Some(encoding) = headers.get("Accept-Encoding") {
+                if encoding.contains("gzip") {
+                    response = response.with_header("Content-Encoding", encoding);
+                }
+            }
+            send_response(&mut stream, response.to_string()).await;
         }
         None => {
             send_response(
