@@ -1,3 +1,4 @@
+use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 mod http_request;
 mod http_response;
@@ -8,6 +9,8 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
 use std::collections::HashMap;
+use std::env;
+use std::path::Path;
 use std::sync::Arc;
 
 use http_request::HttpRequest;
@@ -16,16 +19,46 @@ use prefix_tree::PrefixTree;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = env::args().collect();
+    let files_dir: Arc<String> = Arc::new(args.last().unwrap_or(&"/tmp/".to_string()).to_string());
+
     let mut ptree = PrefixTree::new();
-    ptree.insert("/", "GET", |_| {
+    ptree.insert("/", "GET", |_| async move {
         HttpResponse::new(HttpStatus::Ok).with_body("hello".to_string())
     });
-    ptree.insert("/echo/{text}", "GET", |req| {
+    ptree.insert("/echo/{text}", "GET", |req| async move {
         HttpResponse::new(HttpStatus::Ok).with_body(req.params.get("text").unwrap().to_string())
     });
-    ptree.insert("/user-agent", "GET", |req| {
+    ptree.insert("/user-agent", "GET", |req| async move {
         HttpResponse::new(HttpStatus::Ok)
             .with_body(req.headers.get("user-agent").unwrap().to_string())
+    });
+    ptree.insert("/files/{file_name}", "GET", move |req| {
+        let files_dir = files_dir.clone();
+        async move {
+            let file_name = req.params.get("file_name").unwrap();
+            let file_path = Path::new(&*files_dir).join(file_name);
+
+            match File::open(&file_path).await {
+                Ok(mut file) => {
+                    let mut contents = Vec::new();
+                    if let Err(e) = file.read_to_end(&mut contents).await {
+                        return HttpResponse::new(HttpStatus::InternalServerError)
+                            .with_body(format!("Failed to read file: {}", e));
+                    }
+
+                    HttpResponse::new(HttpStatus::Ok)
+                        .with_body(contents)
+                        .with_header("Content-Type", "application/octet-stream")
+                        .with_header(
+                            "Content-Disposition",
+                            format!("attachment; filename=\"{}\"", file_name),
+                        )
+                }
+                Err(_) => HttpResponse::new(HttpStatus::NotFound)
+                    .with_body(format!("File not found: {}", file_name)),
+            }
+        }
     });
     let ptree = Arc::new(ptree);
 
@@ -86,7 +119,9 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
         Some((route_method, handler, params)) if route_method == method => {
             send_response(
                 &mut stream,
-                handler(HttpRequest::new(headers, params, body)).to_string(),
+                handler(HttpRequest::new(headers, params, body))
+                    .await
+                    .to_string(),
             )
             .await;
         }

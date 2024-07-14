@@ -5,6 +5,7 @@ pub enum HttpStatus {
     Ok = 200,
     BadRequest = 400,
     NotFound = 404,
+    InternalServerError = 500,
 }
 
 impl HttpStatus {
@@ -13,6 +14,7 @@ impl HttpStatus {
             HttpStatus::Ok => "OK",
             HttpStatus::BadRequest => "Bad Request",
             HttpStatus::NotFound => "Not Found",
+            HttpStatus::InternalServerError => "InternalServerError",
         }
     }
 }
@@ -40,6 +42,11 @@ impl HttpResponse {
         self.body = body.into();
         self.headers
             .insert("Content-Length".to_string(), self.body.len().to_string());
+        self
+    }
+
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(key.into(), value.into());
         self
     }
 
