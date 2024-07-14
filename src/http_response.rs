@@ -3,6 +3,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy)]
 pub enum HttpStatus {
     Ok = 200,
+    Created = 201,
     BadRequest = 400,
     NotFound = 404,
     InternalServerError = 500,
@@ -12,6 +13,7 @@ impl HttpStatus {
     fn as_str(&self) -> &'static str {
         match self {
             HttpStatus::Ok => "OK",
+            HttpStatus::Created => "Created",
             HttpStatus::BadRequest => "Bad Request",
             HttpStatus::NotFound => "Not Found",
             HttpStatus::InternalServerError => "InternalServerError",

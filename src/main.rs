@@ -22,6 +22,9 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
     let files_dir: Arc<String> = Arc::new(args.last().unwrap_or(&"/tmp/".to_string()).to_string());
 
+    let dir1 = files_dir.clone();
+    let dir2 = files_dir.clone();
+
     let mut ptree = PrefixTree::new();
     ptree.insert("/", "GET", |_| async move {
         HttpResponse::new(HttpStatus::Ok).with_body("hello".to_string())
@@ -33,11 +36,32 @@ async fn main() {
         HttpResponse::new(HttpStatus::Ok)
             .with_body(req.headers.get("user-agent").unwrap().to_string())
     });
-    ptree.insert("/files/{file_name}", "GET", move |req| {
-        let files_dir = files_dir.clone();
+    ptree.insert("/files/{file_name}", "POST", move |req| {
+        let dir2_clone = Arc::clone(&dir2);
         async move {
             let file_name = req.params.get("file_name").unwrap();
-            let file_path = Path::new(&*files_dir).join(file_name);
+            let file_path = Path::new(&*dir2_clone).join(file_name);
+
+            match File::create(&file_path).await {
+                Ok(mut file) => {
+                    if let Err(e) = file.write_all(&req.body).await {
+                        HttpResponse::new(HttpStatus::InternalServerError)
+                            .with_body(format!("Failed to write file: {}", e))
+                    } else {
+                        HttpResponse::new(HttpStatus::Created)
+                            .with_body(format!("File '{}' created successfully", file_name))
+                    }
+                }
+                Err(e) => HttpResponse::new(HttpStatus::InternalServerError)
+                    .with_body(format!("Failed to create file: {}", e)),
+            }
+        }
+    });
+    ptree.insert("/files/{file_name}", "GET", move |req| {
+        let dir1_clone = Arc::clone(&dir1);
+        async move {
+            let file_name = req.params.get("file_name").unwrap();
+            let file_path = Path::new(&*dir1_clone).join(file_name);
 
             match File::open(&file_path).await {
                 Ok(mut file) => {
@@ -115,8 +139,8 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
             .unwrap();
     }
 
-    match ptree.search(path) {
-        Some((route_method, handler, params)) if route_method == method => {
+    match ptree.search(path, method) {
+        Some((handler, params)) => {
             send_response(
                 &mut stream,
                 handler(HttpRequest::new(headers, params, body))
@@ -124,13 +148,6 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
                     .to_string(),
             )
             .await;
-        }
-        Some(_) => {
-            send_response(
-                &mut stream,
-                HttpResponse::new(HttpStatus::BadRequest).to_string(),
-            )
-            .await
         }
         None => {
             send_response(
