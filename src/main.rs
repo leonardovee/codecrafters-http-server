@@ -146,7 +146,7 @@ async fn handle_connection(mut stream: TcpStream, ptree: &PrefixTree) {
             let mut response = handler(HttpRequest::new(headers.clone(), params, body)).await;
             if let Some(encoding) = headers.get("Accept-Encoding") {
                 if encoding.contains("gzip") {
-                    response = response.with_header("Content-Encoding", encoding);
+                    response = response.with_header("Content-Encoding", "gzip");
                 }
             }
             send_response(&mut stream, response.to_string()).await;
